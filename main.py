@@ -48,12 +48,30 @@ def write_entry(output: Path) -> Path:
     error = validate(LINE)
     if error:
         raise SystemExit(f"invalid entry: {error}")
+    expected_bytes = LINE.encode("utf-8")
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(LINE, encoding="utf-8", newline="")
-    read_back = output.read_text(encoding="utf-8")
-    if read_back != LINE:
+    output.write_bytes(expected_bytes)
+    actual_bytes = output.read_bytes()
+    if actual_bytes != expected_bytes:
         raise SystemExit("read-back mismatch: file does not hold the entry")
+    if len(actual_bytes) != len(expected_bytes):
+        raise SystemExit("read-back mismatch: file has the wrong byte length")
     return output
+
+
+def check_file(path: Path) -> str:
+    """Validate an existing entry file against the gate; '' when valid."""
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return f"cannot read {path}: {exc}"
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return "file is not valid UTF-8"
+    if raw != text.encode("utf-8"):
+        return "file's bytes are not the entry's UTF-8 encoding"
+    return validate(text)
 
 
 def self_test() -> int:
@@ -86,6 +104,12 @@ def self_test() -> int:
             failures.append("round-trip: bytes differ from the entry")
         if target.read_bytes().endswith(b"\n"):
             failures.append("round-trip: file ends with a newline")
+        file_error = check_file(target)
+        if file_error:
+            failures.append(f"round-trip: written file fails the gate: {file_error}")
+        target.write_bytes(b"too\nlong\n" + b"x" * 250)
+        if not check_file(target):
+            failures.append("check_file: over-limit multi-line file passed")
 
     if failures:
         print("self-test FAILED:")
